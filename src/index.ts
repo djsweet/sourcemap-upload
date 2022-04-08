@@ -237,9 +237,22 @@ async function sendUploadPUT(
   });
 }
 
+function shuffleArray<T>(data: T[]): void {
+  // There's no need to shuffle the last element of an array.
+  for (let i = 0; i < data.length - 1; i++) {
+    const remaining = data.length - i;
+    const offset = i + Math.floor(Math.random() * remaining);
+
+    const val = data[offset];
+    data[offset] = data[i];
+    data[i] = val;
+  }
+}
+
 async function sendUploadPUTWithRetries(opts: PutOptions): Promise<Response> {
   for (let i = 0; i < 5; i++) {
     const addrFamilies = await dnsLookup(uploadDNS, { all: true });
+    shuffleArray(addrFamilies);
     for (const { address } of addrFamilies) {
       try {
         return await sendUploadPUT(opts, address);
