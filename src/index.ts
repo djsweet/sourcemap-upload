@@ -3,11 +3,14 @@
 // "URL" is available as a global, but Typescript doesn't have the types
 // for it. Importing it from the module does have types though.
 import { pathToFileURL, URL } from "url";
-import path from "path";
-import fs from "fs";
-import util from "util";
-import crypto from "crypto";
+
 import assert from "assert";
+import crypto from "crypto";
+import dns from "dns";
+import fs from "fs";
+import https from "https";
+import path from "path";
+import util from "util";
 
 import fetch, { Response } from "node-fetch";
 import makeDebug from "debug";
@@ -15,8 +18,11 @@ import glob from "glob";
 import matchAll from "string.prototype.matchall";
 
 const globPromisified = util.promisify(glob);
+const dnsLookup = util.promisify(dns.lookup);
 
 const debug = makeDebug("recordreplay:sourcemap-upload");
+const uploadDNS = `api.replay.io`;
+const uploadEndpoint = "/v1/sourcemap-upload";
 
 export type MessageLevel = "normal" | "verbose";
 export type LogCallback = (level: MessageLevel, message: string) => void;
@@ -209,8 +215,14 @@ type PutOptions = {
   map: SourceMapToUpload;
 };
 
-async function sendUploadPUT(opts: PutOptions): Promise<Response> {
-  return fetch("https://api.replay.io/v1/sourcemap-upload", {
+async function sendUploadPUT(
+  opts: PutOptions,
+  addr: string
+): Promise<Response> {
+  // This is necessary to make TLS SNI work with explicit IP addresses.
+  const agent = new https.Agent({ servername: uploadDNS });
+  debug("Attempting upload with IP", addr);
+  return await fetch(`https://${addr}${uploadEndpoint}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -218,26 +230,34 @@ async function sendUploadPUT(opts: PutOptions): Promise<Response> {
       "X-Replay-SourceMap-Group": opts.groupName,
       "X-Replay-SourceMap-Filename": opts.map.relativePath,
       "X-Replay-SourceMap-ContentHash": `sha256:${opts.map.generatedFileHash}`,
+      Host: uploadDNS,
     },
     body: opts.map.content,
+    agent,
   });
 }
 
 async function sendUploadPUTWithRetries(opts: PutOptions): Promise<Response> {
   for (let i = 0; i < 5; i++) {
-    try {
-      return await sendUploadPUT(opts);
-    } catch (err) {
-      debug(
-        "Sourcemap upload attempt %d failed for %s, got %O",
-        i,
-        opts.map.absPath,
-        err
-      );
+    const addrFamilies = await dnsLookup(uploadDNS, { all: true });
+    for (const { address } of addrFamilies) {
+      try {
+        return await sendUploadPUT(opts, address);
+      } catch (err) {
+        debug(
+          "Sourcemap upload attempt %d failed for %s, got %O",
+          i,
+          opts.map.absPath,
+          err
+        );
+      }
     }
   }
 
-  return sendUploadPUT(opts);
+  {
+    const addrFamily = await dnsLookup(uploadDNS);
+    return await sendUploadPUT(opts, addrFamily.address);
+  }
 }
 
 async function uploadSourcemapToAPI(
