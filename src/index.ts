@@ -249,6 +249,29 @@ function shuffleArray<T>(data: T[]): void {
   }
 }
 
+const baseRetryWindowMS = 100;
+function retrySleepTime(attempt: number): number {
+  // This is according to an Exponential distribution.
+  // The Exponential is the inverse Z transform of the Poisson,
+  // and the sum of Poisson distributions is itself a Poisson
+  // distribution. As a result, the expected load from any
+  // given iteration will be Poisson-distributed.
+  const jitter = -Math.log(1 - Math.random());
+
+  // Quadratic backoff is fair and stable. Exponential backoff,
+  // linear backoff, and constant backoff are not. See:
+  //
+  // "Analysis of Backoff Protocols for Multiple Access Channels";
+  //   Johan Håstad, Tom Leighton, and Brian Rogoff;
+  //   https://www.csc.kth.se/~johanh/ethernetanalysis.pdf
+  //
+  // "Backoff Design for IEEE 802.11 DCF Networks: Fundamental Tradeoff
+  //  and Design Criterion";
+  //   Xinghua Sun and Lin Dai;
+  //   https://www.ee.cityu.edu.hk/~lindai/poly.pdf
+  return jitter * baseRetryWindowMS * (attempt + 1) ** 2;
+}
+
 async function uploadSourcemapToAPIAsRetry(
   groupName: string,
   apiKey: string,
@@ -323,6 +346,9 @@ async function uploadSourcemapToAPI(
           i,
           map.absPath,
           err
+        );
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, retrySleepTime(i))
         );
       }
     }
