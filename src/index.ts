@@ -347,11 +347,11 @@ async function uploadSourcemapToAPI(
           map.absPath,
           err
         );
-        await new Promise<void>((resolve) =>
-          setTimeout(resolve, retrySleepTime(i))
-        );
       }
     }
+    await new Promise<void>((resolve) =>
+      setTimeout(resolve, retrySleepTime(i))
+    );
   }
 
   {
