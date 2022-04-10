@@ -249,6 +249,7 @@ function shuffleArray<T>(data: T[]): void {
   }
 }
 
+const maxUniformProbability = 0.99999;
 const baseRetryWindowMS = 100;
 function retrySleepTime(attempt: number): number {
   // This is according to an Exponential distribution.
@@ -256,7 +257,8 @@ function retrySleepTime(attempt: number): number {
   // and the sum of Poisson distributions is itself a Poisson
   // distribution. As a result, the expected load from any
   // given iteration will be Poisson-distributed.
-  const jitter = -Math.log(1 - Math.random());
+  const roll = Math.min(Math.random(), maxUniformProbability);
+  const jitter = -Math.log(1 - roll);
 
   // Quadratic backoff is fair and stable. Exponential backoff,
   // linear backoff, and constant backoff are not. See:
