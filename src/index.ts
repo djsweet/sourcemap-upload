@@ -217,12 +217,12 @@ type PutOptions = {
 
 async function sendUploadPUT(
   opts: PutOptions,
-  addr: string
+  ipAddress: string
 ): Promise<Response> {
   // This is necessary to make TLS SNI work with explicit IP addresses.
   const agent = new https.Agent({ servername: uploadDNS });
-  debug("Attempting upload with IP", addr);
-  return await fetch(`https://${addr}${uploadEndpoint}`, {
+  debug("Attempting upload with IP", ipAddress);
+  return await fetch(`https://${ipAddress}${uploadEndpoint}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -249,38 +249,15 @@ function shuffleArray<T>(data: T[]): void {
   }
 }
 
-async function sendUploadPUTWithRetries(opts: PutOptions): Promise<Response> {
-  for (let i = 0; i < 5; i++) {
-    const addrFamilies = await dnsLookup(uploadDNS, { all: true });
-    shuffleArray(addrFamilies);
-    for (const { address } of addrFamilies) {
-      try {
-        return await sendUploadPUT(opts, address);
-      } catch (err) {
-        debug(
-          "Sourcemap upload attempt %d failed for %s, got %O",
-          i,
-          opts.map.absPath,
-          err
-        );
-      }
-    }
-  }
-
-  {
-    const addrFamily = await dnsLookup(uploadDNS);
-    return await sendUploadPUT(opts, addrFamily.address);
-  }
-}
-
-async function uploadSourcemapToAPI(
+async function uploadSourcemapToAPIAsRetry(
   groupName: string,
   apiKey: string,
-  map: SourceMapToUpload
+  map: SourceMapToUpload,
+  ipAddress: string
 ) {
   let response;
   try {
-    response = await sendUploadPUTWithRetries({ groupName, apiKey, map });
+    response = await sendUploadPUT({ groupName, apiKey, map }, ipAddress);
   } catch (
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     err: any
@@ -320,6 +297,44 @@ async function uploadSourcemapToAPI(
     debug("Failure uploading sourcemap for %s, got %O", map.absPath, obj);
     throw new Error(
       typeof obj.error === "string" ? obj.error : "Unknown upload error"
+    );
+  }
+}
+
+async function uploadSourcemapToAPI(
+  groupName: string,
+  apiKey: string,
+  map: SourceMapToUpload
+) {
+  for (let i = 0; i < 5; i++) {
+    const addrFamilies = await dnsLookup(uploadDNS, { all: true });
+    shuffleArray(addrFamilies);
+    for (const { address } of addrFamilies) {
+      try {
+        return await uploadSourcemapToAPIAsRetry(
+          groupName,
+          apiKey,
+          map,
+          address
+        );
+      } catch (err) {
+        debug(
+          "Sourcemap upload attempt %d failed for %s, got %O",
+          i,
+          map.absPath,
+          err
+        );
+      }
+    }
+  }
+
+  {
+    const addrFamily = await dnsLookup(uploadDNS);
+    return await uploadSourcemapToAPIAsRetry(
+      groupName,
+      apiKey,
+      map,
+      addrFamily.address
     );
   }
 }
